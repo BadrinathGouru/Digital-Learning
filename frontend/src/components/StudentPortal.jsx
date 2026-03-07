@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactPlayer from 'react-player';
 import socket from '../socket';
 import SyncStatus from './SyncStatus';
+import { API_BASE } from '../config';
 
-const API = 'http://localhost:5001/api';
+const API = API_BASE;
 
 export default function StudentPortal({ user }) {
     const [activeTab, setActiveTab] = useState('home');
@@ -12,6 +14,10 @@ export default function StudentPortal({ user }) {
     const [isSaving, setIsSaving] = useState(false);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const [onlineCount, setOnlineCount] = useState(0);
+
+    // Lesson Viewer State
+    const [activeLesson, setActiveLesson] = useState(null);
+    const [lessonProgress, setLessonProgress] = useState(0);
 
     // Quiz Runner State
     const [activeQuiz, setActiveQuiz] = useState(null);
@@ -28,6 +34,9 @@ export default function StudentPortal({ user }) {
 
     // Lesson Filter
     const [subjectFilter, setSubjectFilter] = useState('All');
+    const [lessonSearch, setLessonSearch] = useState('');
+    const [quizFilter, setQuizFilter] = useState('pending');
+    const [showSubmitModal, setShowSubmitModal] = useState(false);
 
     useEffect(() => {
         socket.emit('join_class', 'class-8a');
@@ -120,7 +129,12 @@ export default function StudentPortal({ user }) {
     };
 
     const subjects = ['All', 'Mathematics', 'Science', 'English', 'Punjabi', 'Computer'];
-    const filteredLessons = subjectFilter === 'All' ? lessons : lessons.filter(l => l.subject === subjectFilter);
+    const filteredLessons = lessons.filter(l => {
+        const matchSubject = subjectFilter === 'All' || l.subject === subjectFilter;
+        const matchSearch = !lessonSearch || l.title?.toLowerCase().includes(lessonSearch.toLowerCase());
+        return matchSubject && matchSearch;
+    });
+    const answeredCount = Object.keys(answers).filter(k => answers[k]).length;
 
     // ──── QUIZ RESULT SCREEN ────
     if (quizResult) {
@@ -155,6 +169,75 @@ export default function StudentPortal({ user }) {
                         })}
                     </div>
                     <button onClick={() => { setActiveQuiz(null); setQuizResult(null); setAnswers({}); }} className="w-full py-3.5 bg-indigo-600 rounded-xl font-bold text-sm">Back to Home</button>
+                </div>
+            </div>
+        );
+    }
+
+    // ──── LESSON VIEWER ────
+    if (activeLesson) {
+        const linkedQuiz = quizzes.find(qz => qz.lessonId === activeLesson._id) || quizzes[0];
+        return (
+            <div className="min-h-screen bg-slate-950 text-white font-sans flex flex-col max-w-md mx-auto relative">
+                <div className="flex items-center gap-3 p-4 border-b border-white/10 sticky top-0 bg-slate-950 z-10">
+                    <button onClick={() => { setActiveLesson(null); setLessonProgress(0); }} className="p-2 -ml-2 hover:bg-white/5 rounded-full"><svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg></button>
+                    <div className="flex-1 min-w-0"><span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-400">{activeLesson.subject}</span><h2 className="text-sm font-bold truncate">{activeLesson.title}</h2></div>
+                    <span className="text-[10px] font-extrabold text-indigo-400 bg-indigo-500/10 px-2 py-1 rounded-lg">{Math.round(lessonProgress)}%</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pb-24">
+                    {activeLesson.contentUrl ? (
+                        <div className="w-full aspect-video bg-black border-b border-white/10">
+                            <ReactPlayer url={activeLesson.contentUrl} width="100%" height="100%" playing={false} controls={true} onProgress={({ played }) => setLessonProgress(played * 100)} />
+                        </div>
+                    ) : (
+                        <div className="w-full aspect-video bg-gradient-to-br from-slate-800 to-slate-900 flex flex-col items-center justify-center border-b border-white/10">
+                            <span className="text-5xl mb-3">📄</span><p className="font-bold text-sm text-slate-300">Document Lesson</p><p className="text-[10px] text-slate-500 mt-1">No video available for this lesson</p>
+                        </div>
+                    )}
+
+                    {/* Progress Bar */}
+                    <div className="px-5 pt-4">
+                        <div className="flex justify-between text-[10px] font-bold text-slate-500 mb-1.5">
+                            <span>LESSON PROGRESS</span><span className={lessonProgress > 80 ? 'text-emerald-400' : 'text-indigo-400'}>{Math.round(lessonProgress)}%</span>
+                        </div>
+                        <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div className={`h-2 rounded-full transition-all duration-500 ${lessonProgress > 80 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${lessonProgress}%` }} />
+                        </div>
+                    </div>
+
+                    <div className="p-5 space-y-6">
+                        <div>
+                            <h1 className="text-2xl font-black mb-2">{activeLesson.title}</h1>
+                            <div className="flex flex-wrap gap-2">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-md">{activeLesson.language || 'English'}</span>
+                                <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-md">⏱ {activeLesson.duration || 30} mins</span>
+                                {activeLesson.grade && <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 px-2 py-1 rounded-md">Grade {activeLesson.grade}</span>}
+                            </div>
+                        </div>
+
+                        {activeLesson.description && (
+                            <div>
+                                <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2">Description</p>
+                                <p className="text-sm text-slate-300 leading-relaxed font-medium">{activeLesson.description}</p>
+                            </div>
+                        )}
+
+                        {activeLesson.pdfUrl && (
+                            <a href={activeLesson.pdfUrl} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between p-4 bg-indigo-600/20 border border-indigo-500/30 rounded-2xl hover:bg-indigo-600/30 transition-colors">
+                                <div className="flex items-center gap-3"><span className="text-2xl">📄</span><div><p className="text-sm font-bold text-indigo-300">Open PDF Notes</p><p className="text-[10px] text-indigo-400/60 font-semibold">{activeLesson.title} Notes</p></div></div>
+                                <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                            </a>
+                        )}
+
+                        {linkedQuiz && lessonProgress > 80 && (
+                            <div className="pt-4 border-t border-white/10">
+                                <button onClick={() => { setActiveLesson(null); setLessonProgress(0); setActiveQuiz(linkedQuiz); setCurrentQ(0); setAnswers({}); setQuizResult(null); }} className="w-full py-4 bg-indigo-600 rounded-2xl font-bold text-sm hover:bg-indigo-500 shadow-lg shadow-indigo-600/20 flex justify-center items-center gap-2 active:scale-95 transition-all">
+                                    <span>Take Quiz for this Lesson →</span>
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         );
@@ -219,11 +302,26 @@ export default function StudentPortal({ user }) {
                     <button onClick={() => setCurrentQ(Math.max(0, currentQ - 1))} disabled={currentQ === 0}
                         className={`px-6 py-3.5 rounded-xl font-bold text-sm ${currentQ === 0 ? 'bg-slate-800 text-slate-600' : 'bg-slate-700 text-white'}`}>← Previous</button>
                     {currentQ === total - 1 ? (
-                        <button onClick={handleQuizSubmit} className="px-8 py-3.5 bg-emerald-600 text-white font-extrabold rounded-xl text-sm hover:bg-emerald-500 active:scale-95 transition-all">Submit Quiz</button>
+                        <button onClick={() => setShowSubmitModal(true)} className="px-8 py-3.5 bg-emerald-600 text-white font-extrabold rounded-xl text-sm hover:bg-emerald-500 active:scale-95 transition-all">Submit Quiz</button>
                     ) : (
                         <button onClick={() => setCurrentQ(Math.min(total - 1, currentQ + 1))} className="px-6 py-3.5 bg-indigo-600 text-white font-bold rounded-xl text-sm">Next →</button>
                     )}
                 </div>
+
+                {/* Submit Confirmation Modal */}
+                {showSubmitModal && (
+                    <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6">
+                        <div className="bg-slate-800 rounded-3xl p-6 w-full max-w-sm space-y-4 text-center">
+                            <h3 className="font-extrabold text-lg">Submit your quiz?</h3>
+                            <p className="text-sm text-slate-400">You have answered <span className="font-bold text-white">{answeredCount}</span> of <span className="font-bold text-white">{total}</span> questions.</p>
+                            {answeredCount < total && <p className="text-xs text-amber-400 font-bold">⚠️ {total - answeredCount} question{total - answeredCount > 1 ? 's' : ''} unanswered</p>}
+                            <div className="flex gap-3 pt-2">
+                                <button onClick={() => setShowSubmitModal(false)} className="flex-1 py-3 bg-slate-700 rounded-xl font-bold text-sm text-slate-300">Review</button>
+                                <button onClick={() => { setShowSubmitModal(false); handleQuizSubmit(); }} className="flex-1 py-3 bg-emerald-600 rounded-xl font-bold text-sm text-white hover:bg-emerald-500">Submit Now</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }
@@ -306,7 +404,7 @@ export default function StudentPortal({ user }) {
                     {quizzes.length > 0 && (
                         <div>
                             <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2">Pending Quiz</p>
-                            <div onClick={() => setActiveQuiz(quizzes[0])} className="bg-slate-800 rounded-2xl p-4 border border-amber-500/20 flex items-center justify-between cursor-pointer hover:border-amber-500/40 transition-all active:scale-[0.98]">
+                            <div onClick={() => { setActiveQuiz(quizzes[0]); setCurrentQ(0); setAnswers({}); setQuizResult(null); }} className="bg-slate-800 rounded-2xl p-4 border border-amber-500/20 flex items-center justify-between cursor-pointer hover:border-amber-500/40 transition-all active:scale-[0.98]">
                                 <div className="flex items-center space-x-3">
                                     <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center text-amber-400 text-xl">📝</div>
                                     <div><h3 className="font-bold text-sm">{quizzes[0].title}</h3><p className="text-[11px] text-slate-500 font-semibold">{quizzes[0].questions?.length || 5} questions · {Math.floor((quizzes[0].timeLimit || 900) / 60)} mins</p></div>
@@ -321,7 +419,7 @@ export default function StudentPortal({ user }) {
                         <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2">Today's Lessons</p>
                         <div className="space-y-3">
                             {lessons.slice(0, 3).map((lesson, i) => (
-                                <div key={lesson._id || i} className="bg-slate-800 rounded-2xl p-4 border border-white/5 flex items-center gap-4 cursor-pointer hover:border-indigo-500/30 transition-all">
+                                <div key={lesson._id || i} onClick={() => { setActiveLesson(lesson); setLessonProgress(0); }} className="bg-slate-800 rounded-2xl p-4 border border-white/5 flex items-center gap-4 cursor-pointer hover:border-indigo-500/30 transition-all active:scale-[0.98]">
                                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg ${['bg-blue-500/10 text-blue-400', 'bg-emerald-500/10 text-emerald-400', 'bg-purple-500/10 text-purple-400', 'bg-amber-500/10 text-amber-400', 'bg-pink-500/10 text-pink-400'][i % 5]}`}>{['📐', '🔬', '📖', 'ਪ', '💻'][i % 5]}</div>
                                     <div className="flex-1 min-w-0">
                                         <h3 className="text-sm font-bold truncate">{lesson.title}</h3>
@@ -338,7 +436,7 @@ export default function StudentPortal({ user }) {
                 {activeTab === 'lessons' && (
                     <div className="space-y-4">
                         <h2 className="text-xl font-bold">All Lessons</h2>
-                        <div className="relative"><input type="text" className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-white/10 rounded-xl text-white placeholder-slate-500 font-semibold focus:border-indigo-500 outline-none text-sm" placeholder="Search lessons..." /><svg className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></div>
+                        <div className="relative"><input type="text" value={lessonSearch} onChange={e => setLessonSearch(e.target.value)} className="w-full pl-10 pr-4 py-3 bg-slate-800 border border-white/10 rounded-xl text-white placeholder-slate-500 font-semibold focus:border-indigo-500 outline-none text-sm" placeholder="🔍 Search lessons..." /><svg className="absolute left-3 top-3.5 w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></div>
 
                         {/* Subject Filter Pills */}
                         <div className="flex overflow-x-auto gap-2 pb-2 hide-scrollbar">
@@ -348,7 +446,7 @@ export default function StudentPortal({ user }) {
                         {/* Lesson Cards */}
                         <div className="space-y-3">
                             {filteredLessons.map((lesson, i) => (
-                                <div key={lesson._id || i} className="bg-slate-800 rounded-2xl p-4 border border-white/5 flex items-center gap-4">
+                                <div key={lesson._id || i} onClick={() => { setActiveLesson(lesson); setLessonProgress(0); }} className="bg-slate-800 rounded-2xl p-4 border border-white/5 flex items-center gap-4 cursor-pointer hover:border-indigo-500/30 transition-all active:scale-[0.98]">
                                     <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg shrink-0 ${['bg-blue-500/10 text-blue-400', 'bg-emerald-500/10 text-emerald-400', 'bg-purple-500/10 text-purple-400', 'bg-amber-500/10 text-amber-400', 'bg-pink-500/10 text-pink-400'][i % 5]}`}>{['📐', '🔬', '📖', 'ਪ', '💻'][i % 5]}</div>
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-0.5"><span className={`text-[9px] font-extrabold uppercase tracking-wider ${['text-blue-400', 'text-emerald-400', 'text-purple-400'][i % 3]}`}>{lesson.subject}</span></div>
@@ -356,8 +454,7 @@ export default function StudentPortal({ user }) {
                                         <p className="text-[11px] text-slate-500 font-semibold">{lesson.language || 'English'} · {lesson.duration || 30} min</p>
                                     </div>
                                     <div className="flex flex-col items-center gap-1 shrink-0">
-                                        <button className="bg-indigo-600 text-white text-[10px] font-bold py-2 px-4 rounded-lg">Start</button>
-                                        <span className="text-[9px] text-emerald-400 font-bold">✓ Offline</span>
+                                        <span className="bg-indigo-600 text-white text-[10px] font-bold py-2 px-4 rounded-lg">Start</span>
                                     </div>
                                 </div>
                             ))}
@@ -371,19 +468,20 @@ export default function StudentPortal({ user }) {
                     <div className="space-y-4">
                         <h2 className="text-xl font-bold">Quizzes</h2>
                         <div className="flex bg-slate-800 p-1 rounded-xl">
-                            <button className="flex-1 py-2 bg-indigo-600 rounded-lg text-xs font-bold">Pending</button>
-                            <button className="flex-1 py-2 text-xs font-bold text-slate-500">Completed</button>
+                            <button onClick={() => setQuizFilter('pending')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-colors ${quizFilter === 'pending' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>Pending</button>
+                            <button onClick={() => setQuizFilter('completed')} className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-colors ${quizFilter === 'completed' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-white'}`}>Completed</button>
                         </div>
                         <div className="space-y-3">
                             {quizzes.map((quiz, i) => (
                                 <div key={quiz._id || i} className="bg-slate-800 rounded-2xl p-4 border border-white/5">
                                     <div className="flex items-center justify-between mb-3">
-                                        <div><h3 className="font-bold text-sm">{quiz.title}</h3><p className="text-[11px] text-slate-500 font-semibold">{quiz.subject} · {quiz.questions?.length} questions</p></div>
+                                        <div><h3 className="font-bold text-sm">{quiz.title}</h3><p className="text-[11px] text-slate-500 font-semibold">{quiz.subject} · {quiz.questions?.length} questions · {Math.floor((quiz.timeLimit || 900) / 60)} min</p></div>
                                         <span className="text-[10px] font-extrabold bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded-md uppercase">New</span>
                                     </div>
-                                    <button onClick={() => setActiveQuiz(quiz)} className="w-full py-3 bg-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-500 active:scale-95 transition-all">Start Quiz →</button>
+                                    <button onClick={() => { setActiveQuiz(quiz); setCurrentQ(0); setAnswers({}); setQuizResult(null); }} className="w-full py-3 bg-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-500 active:scale-95 transition-all">Start Quiz →</button>
                                 </div>
                             ))}
+                            {quizzes.length === 0 && <p className="text-center text-slate-500 text-sm py-8">✏️ No quizzes available yet.</p>}
                         </div>
                     </div>
                 )}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { API_BASE } from '../config';
 
-const API = 'http://localhost:5001/api';
+const API = API_BASE;
 
 export default function AdminPanel({ user }) {
     const [activeTab, setActiveTab] = useState('overview');

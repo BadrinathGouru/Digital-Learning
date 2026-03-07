@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { API_BASE } from '../config';
 
-const API = 'http://localhost:5001/api/users';
+const API = `${API_BASE}/users`;
 
 export default function Login({ onLogin }) {
     const [isLogin, setIsLogin] = useState(true);

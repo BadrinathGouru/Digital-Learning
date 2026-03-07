@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import socket from '../socket';
+import { API_BASE } from '../config';
 
-const API = 'http://localhost:5001/api';
+const API = API_BASE;
 
 export default function TeacherDashboard({ user }) {
     const [activeTab, setActiveTab] = useState('overview');
@@ -33,6 +34,7 @@ export default function TeacherDashboard({ user }) {
     const [quizForm, setQuizForm] = useState({ title: '', subject: 'Mathematics', grade: '8', language: 'English', timeLimit: 900, passingScore: 60, badgeAwarded: '⭐', questions: [] });
     const [editingQuestion, setEditingQuestion] = useState(null);
     const [qForm, setQForm] = useState({ questionText: '', type: 'mcq', options: ['', '', '', ''], correctAnswer: '', points: 1, explanation: '' });
+    const [previewMode, setPreviewMode] = useState(false);
 
     // Chat State
     const [chatMessages, setChatMessages] = useState([]);
@@ -139,18 +141,26 @@ export default function TeacherDashboard({ user }) {
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'class_analytics.csv'; a.click();
     };
 
-    const handleCreateQuiz = async () => {
+    const handleCreateQuiz = async (launchLive = false) => {
         const totalPoints = quizForm.questions.reduce((a, q) => a + q.points, 0);
         try {
             const res = await fetch(`${API}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...quizForm, totalPoints, createdBy: user?._id }) });
             const newQuiz = await res.json();
             setQuizzes(prev => [newQuiz, ...prev]);
             setShowQuizBuilder(false);
+            if (launchLive) launchLiveQuiz(newQuiz);
         } catch (e) { alert('Failed to save'); }
     };
 
-    const addQuestion = () => {
-        setQuizForm(prev => ({ ...prev, questions: [...prev.questions, { ...qForm }] }));
+    const saveQuestion = () => {
+        if (editingQuestion !== null) {
+            const newQuestions = [...quizForm.questions];
+            newQuestions[editingQuestion] = { ...qForm };
+            setQuizForm(prev => ({ ...prev, questions: newQuestions }));
+            setEditingQuestion(null);
+        } else {
+            setQuizForm(prev => ({ ...prev, questions: [...prev.questions, { ...qForm }] }));
+        }
         setQForm({ questionText: '', type: 'mcq', options: ['', '', '', ''], correctAnswer: '', points: 1, explanation: '' });
     };
 
@@ -240,55 +250,117 @@ export default function TeacherDashboard({ user }) {
     // ──── QUIZ BUILDER MODAL ────
     if (showQuizBuilder) {
         return (
-            <div className="min-h-screen bg-slate-950 text-white font-sans max-w-md mx-auto p-5 pb-24">
+            <div className="min-h-screen bg-slate-950 text-white font-sans max-w-md mx-auto p-5 pb-24 relative">
                 <div className="flex justify-between items-center mb-6">
                     <button onClick={() => setShowQuizBuilder(false)} className="text-sm font-bold text-slate-400">← Back</button>
                     <h2 className="text-lg font-extrabold">Quiz Builder</h2>
-                    <div className="w-12"></div>
+                    <button onClick={() => setPreviewMode(!previewMode)} className="text-[10px] font-bold bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-white/10 hover:bg-slate-700">{previewMode ? 'Exit Preview' : 'Preview'}</button>
                 </div>
-                <div className="space-y-4">
-                    <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Quiz Title</label><input value={quizForm.title} onChange={e => setQuizForm({ ...quizForm, title: e.target.value })} className="w-full p-3.5 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" placeholder="Quiz title..." /></div>
-                    <div className="grid grid-cols-2 gap-3">
-                        <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Time (min)</label><input type="number" value={Math.floor(quizForm.timeLimit / 60)} onChange={e => setQuizForm({ ...quizForm, timeLimit: parseInt(e.target.value || 0) * 60 })} className="w-full p-3 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" /></div>
-                        <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Passing %</label><input type="number" value={quizForm.passingScore} onChange={e => setQuizForm({ ...quizForm, passingScore: parseInt(e.target.value || 60) })} className="w-full p-3 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" /></div>
-                    </div>
 
-                    {/* Existing Questions */}
-                    <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2">Questions ({quizForm.questions.length})</p>
-                        {quizForm.questions.map((q, i) => (
-                            <div key={i} className="bg-slate-800 rounded-xl p-3 mb-2 border border-white/5 flex items-center justify-between">
-                                <div><span className="text-[9px] font-bold uppercase bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded mr-2">{q.type}</span><span className="text-sm font-semibold">{q.questionText.slice(0, 40)}{q.questionText.length > 40 ? '...' : ''}</span></div>
-                                <button onClick={() => setQuizForm(prev => ({ ...prev, questions: prev.questions.filter((_, idx) => idx !== i) }))} className="text-red-400 text-xs font-bold">✕</button>
+                {previewMode ? (
+                    <div className="space-y-6">
+                        <div className="text-center p-6 bg-indigo-900/20 border border-indigo-500/20 rounded-3xl">
+                            <h3 className="text-xl font-black mb-2">{quizForm.title || 'Untitled Quiz'}</h3>
+                            <div className="flex justify-center gap-3 text-[10px] font-bold text-indigo-400">
+                                <span className="flex items-center gap-1">⏱ {Math.floor(quizForm.timeLimit / 60)} min</span>
+                                <span className="flex items-center gap-1">🎯 Pass: {quizForm.passingScore}%</span>
                             </div>
-                        ))}
-                    </div>
-
-                    {/* Question Editor */}
-                    <div className="bg-slate-800/50 rounded-2xl p-4 border border-white/10 space-y-3">
-                        <p className="text-xs font-extrabold text-indigo-400 uppercase tracking-wider">Add Question</p>
-                        <div className="flex bg-slate-900 rounded-xl p-1 gap-1">
-                            {['mcq', 'true_false', 'fill_blank'].map(t => <button key={t} onClick={() => setQForm({ ...qForm, type: t })} className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase ${qForm.type === t ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>{t.replace('_', '/')}</button>)}
                         </div>
-                        <input value={qForm.questionText} onChange={e => setQForm({ ...qForm, questionText: e.target.value })} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white text-sm font-semibold focus:border-indigo-500 outline-none" placeholder="Question text..." />
-                        {qForm.type === 'mcq' && qForm.options.map((opt, i) => (
-                            <div key={i} className="flex gap-2 items-center">
-                                <input type="radio" name="correct" checked={qForm.correctAnswer === opt && opt !== ''} onChange={() => setQForm({ ...qForm, correctAnswer: opt })} className="accent-indigo-500" />
-                                <input value={opt} onChange={e => { const o = [...qForm.options]; o[i] = e.target.value; setQForm({ ...qForm, options: o }); }} className="flex-1 p-2.5 bg-slate-900 border border-white/10 rounded-lg text-white text-xs font-semibold focus:border-indigo-500 outline-none" placeholder={`Option ${String.fromCharCode(65 + i)}`} />
+                        {quizForm.questions.map((q, i) => (
+                            <div key={i} className="bg-slate-900 rounded-3xl p-5 border border-white/5 space-y-4">
+                                <p className="text-sm font-bold leading-relaxed"><span className="text-indigo-400 mr-2">Q{i + 1}.</span>{q.questionText}</p>
+
+                                {q.type === 'mcq' && (
+                                    <div className="space-y-2">
+                                        {q.options.map((opt, oIdx) => (
+                                            <button key={oIdx} className="w-full text-left p-4 bg-slate-800 hover:bg-slate-700/80 rounded-2xl border border-white/5 font-semibold text-sm transition-all flex items-center gap-3">
+                                                <div className="w-5 h-5 rounded-full border-2 border-slate-600"></div>{opt}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                                {q.type === 'true_false' && (
+                                    <div className="flex gap-3">
+                                        {['True', 'False'].map((opt) => (
+                                            <button key={opt} className="flex-1 py-4 bg-slate-800 hover:bg-slate-700/80 rounded-2xl border border-white/5 font-bold text-sm transition-all">{opt}</button>
+                                        ))}
+                                    </div>
+                                )}
+                                {q.type === 'fill_blank' && (
+                                    <input type="text" placeholder="Type your answer..." className="w-full p-4 bg-slate-800 border-b-2 border-indigo-500/50 rounded-t-xl text-white font-bold text-sm focus:border-indigo-500 outline-none" />
+                                )}
                             </div>
                         ))}
-                        {qForm.type === 'true_false' && (
-                            <div className="flex gap-3">{['True', 'False'].map(v => <button key={v} onClick={() => setQForm({ ...qForm, correctAnswer: v })} className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 ${qForm.correctAnswer === v ? 'bg-indigo-600 border-indigo-500' : 'bg-slate-900 border-white/10'}`}>{v}</button>)}</div>
-                        )}
-                        {qForm.type === 'fill_blank' && <input value={qForm.correctAnswer} onChange={e => setQForm({ ...qForm, correctAnswer: e.target.value })} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white text-sm font-semibold focus:border-indigo-500 outline-none" placeholder="Correct answer..." />}
-                        <input value={qForm.explanation} onChange={e => setQForm({ ...qForm, explanation: e.target.value })} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white text-xs font-semibold focus:border-indigo-500 outline-none" placeholder="Explanation (shown after)..." />
-                        <button onClick={addQuestion} disabled={!qForm.questionText || !qForm.correctAnswer} className="w-full py-3 bg-indigo-600 rounded-xl text-sm font-bold disabled:opacity-40">+ Add Question</button>
+                        {quizForm.questions.length === 0 && <p className="text-center text-slate-500 font-bold text-sm py-10">No questions added yet.</p>}
                     </div>
+                ) : (
+                    <div className="space-y-4">
+                        <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Quiz Title *</label><input value={quizForm.title} onChange={e => setQuizForm({ ...quizForm, title: e.target.value })} className="w-full p-3.5 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" placeholder="Quiz title..." /></div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Time Limit (min)</label><input type="number" value={Math.floor(quizForm.timeLimit / 60)} onChange={e => setQuizForm({ ...quizForm, timeLimit: parseInt(e.target.value || 0) * 60 })} className="w-full p-3 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" /></div>
+                            <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Passing %</label><input type="number" value={quizForm.passingScore} onChange={e => setQuizForm({ ...quizForm, passingScore: parseInt(e.target.value || 60) })} className="w-full p-3 bg-slate-800 border border-white/10 rounded-xl text-white font-semibold text-sm focus:border-indigo-500 outline-none" /></div>
+                        </div>
 
-                    <div className="flex gap-3 pt-2">
-                        <button onClick={handleCreateQuiz} disabled={quizForm.questions.length === 0} className="flex-1 py-4 bg-indigo-600 text-white font-bold text-sm rounded-xl disabled:opacity-40">Save Quiz</button>
-                        <button onClick={() => { handleCreateQuiz(); if (quizzes.length > 0) launchLiveQuiz(quizzes[0]); }} disabled={quizForm.questions.length === 0} className="flex-1 py-4 bg-emerald-600 text-white font-bold text-sm rounded-xl disabled:opacity-40">Launch Live</button>
+                        {/* Existing Questions List */}
+                        <div><p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-2">Questions ({quizForm.questions.length})</p>
+                            {quizForm.questions.map((q, i) => (
+                                <div key={i} className={`bg-slate-800 rounded-xl p-3 mb-2 border ${editingQuestion === i ? 'border-indigo-500' : 'border-white/5'} flex items-center justify-between`}>
+                                    <div className="flex-1 mr-3"><span className="text-[9px] font-bold uppercase bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded mr-2">{q.type === 'true_false' ? 'T/F' : q.type === 'fill_blank' ? 'Blank' : 'MCQ'}</span><span className="text-sm font-semibold">{q.questionText.slice(0, 35)}{q.questionText.length > 35 ? '...' : ''}</span></div>
+                                    <div className="flex items-center gap-3">
+                                        <button onClick={() => { setEditingQuestion(i); setQForm({ ...q }); }} className="text-indigo-400 text-[10px] font-extrabold uppercase hover:text-indigo-300">Edit</button>
+                                        <button onClick={() => setQuizForm(prev => ({ ...prev, questions: prev.questions.filter((_, idx) => idx !== i) }))} className="text-red-400 text-xs font-bold hover:text-red-300">✕</button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Question Editor Panel */}
+                        <div className={`bg-slate-800/50 rounded-3xl p-5 border ${editingQuestion !== null ? 'border-amber-500/50' : 'border-white/10'} space-y-4`}>
+                            <div className="flex justify-between items-center mb-1">
+                                <p className="text-xs font-extrabold text-indigo-400 uppercase tracking-wider">{editingQuestion !== null ? `Editing Q${editingQuestion + 1}` : 'Add Question'}</p>
+                                {editingQuestion !== null && <button onClick={() => { setEditingQuestion(null); setQForm({ questionText: '', type: 'mcq', options: ['', '', '', ''], correctAnswer: '', points: 1, explanation: '' }); }} className="text-[9px] text-amber-500 font-extrabold uppercase bg-amber-500/10 px-2 py-1 rounded">Cancel Edit</button>}
+                            </div>
+
+                            <div className="flex bg-slate-900 rounded-xl p-1 gap-1">
+                                {['mcq', 'true_false', 'fill_blank'].map(t => <button key={t} onClick={() => setQForm({ ...qForm, type: t })} className={`flex-1 py-2.5 rounded-lg text-[10px] font-bold uppercase transition-colors ${qForm.type === t ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-white'}`}>{t === 'true_false' ? 'True/False' : t === 'fill_blank' ? 'Fill in Blank' : 'MCQ'}</button>)}
+                            </div>
+
+                            <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Question Text</label><textarea rows={2} value={qForm.questionText} onChange={e => setQForm({ ...qForm, questionText: e.target.value })} className="w-full p-3.5 bg-slate-900 border border-white/10 rounded-xl text-white text-sm font-semibold focus:border-indigo-500 outline-none resize-none" placeholder="Enter question..." /></div>
+
+                            {qForm.type === 'mcq' && (
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Options (Select Correct)</label>
+                                    {qForm.options.map((opt, i) => (
+                                        <div key={i} className={`flex gap-3 items-center p-1.5 rounded-xl border ${qForm.correctAnswer === opt && opt !== '' ? 'border-indigo-500 bg-indigo-500/10' : 'border-transparent'}`}>
+                                            <input type="radio" name="correct" checked={qForm.correctAnswer === opt && opt !== ''} onChange={() => setQForm({ ...qForm, correctAnswer: opt })} className="w-4 h-4 ml-2 accent-indigo-500 cursor-pointer" />
+                                            <input value={opt} onChange={e => { const o = [...qForm.options]; o[i] = e.target.value; setQForm({ ...qForm, options: o, correctAnswer: qForm.correctAnswer === opt ? e.target.value : qForm.correctAnswer }); }} className="flex-1 p-2.5 bg-slate-900 border border-white/10 rounded-lg text-white text-xs font-semibold focus:border-indigo-500 outline-none" placeholder={`Option ${String.fromCharCode(65 + i)}`} />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {qForm.type === 'true_false' && (
+                                <div>
+                                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-2">Correct Answer</label>
+                                    <div className="flex gap-3">{['True', 'False'].map(v => <button key={v} onClick={() => setQForm({ ...qForm, correctAnswer: v })} className={`flex-1 py-3.5 rounded-xl font-bold text-sm border-2 transition-all ${qForm.correctAnswer === v ? 'bg-indigo-600 border-indigo-500 shadow-lg shadow-indigo-600/30 text-white' : 'bg-slate-900 border-white/10 text-slate-400'}`}>{v}</button>)}</div>
+                                </div>
+                            )}
+
+                            {qForm.type === 'fill_blank' && <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Correct Answer</label><input value={qForm.correctAnswer} onChange={e => setQForm({ ...qForm, correctAnswer: e.target.value })} className="w-full p-3.5 bg-slate-900 border border-white/10 rounded-xl text-white text-sm font-semibold focus:border-indigo-500 outline-none" placeholder="Exact answer match..." /></div>}
+
+                            <div><label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 block mb-1">Explanation (Optional)</label><input value={qForm.explanation} onChange={e => setQForm({ ...qForm, explanation: e.target.value })} className="w-full p-3 bg-slate-900 border border-white/10 rounded-xl text-white text-xs font-semibold focus:border-indigo-500 outline-none" placeholder="Shown after student answers..." /></div>
+
+                            <button onClick={saveQuestion} disabled={!qForm.questionText || !qForm.correctAnswer || (qForm.type === 'mcq' && qForm.options.some(o => !o))} className="w-full mt-2 py-3.5 bg-indigo-600 rounded-xl text-sm font-extrabold hover:bg-indigo-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed uppercase tracking-wider">
+                                {editingQuestion !== null ? 'Update Question' : '+ Add Question'}
+                            </button>
+                        </div>
+
+                        <div className="flex gap-3 pt-6">
+                            <button onClick={() => handleCreateQuiz(false)} disabled={quizForm.questions.length === 0 || !quizForm.title} className="flex-1 py-4 bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-sm rounded-2xl disabled:opacity-40 transition-colors border border-white/5">Save Quiz</button>
+                            <button onClick={() => handleCreateQuiz(true)} disabled={quizForm.questions.length === 0 || !quizForm.title} className="flex-[2] py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-sm rounded-2xl disabled:opacity-40 transition-colors shadow-lg shadow-emerald-600/20">Launch Live Class Quiz 🚀</button>
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
         );
     }
